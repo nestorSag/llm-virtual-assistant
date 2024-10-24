@@ -406,3 +406,24 @@ resource "aws_sagemaker_notebook_instance" "demo" {
   security_groups        = [aws_security_group.lambda_ingestion.id]
   direct_internet_access = "Enabled" # Required to download depenencies
 }
+
+
+
+module "vpn-client" {
+  source  = "babicamir/vpn-client/aws"
+  version = "1.0.1"
+  organization_name      = "Lynceus"
+  project-name           = "bedrock-rag-template"
+  environment            = "dev"
+  # Network information
+  vpc_id                 = module.vpc.vpc_id
+  subnet_id              = module.vpc.public_subnets[0]
+  client_cidr_block      = var.vpn_cidr # It must be different from the primary VPC CIDR
+  # VPN config options
+  split_tunnel           = "true" # or false
+  vpn_inactive_period = "300" # seconds
+  session_timeout_hours  = "8"
+  logs_retention_in_days = "7"
+  # List of users to be created
+  aws-vpn-client-list    = ["root", "nestor", "guglielmo"] #Do not delete "root" user!
+}

@@ -23,3 +23,8 @@ variable "text_generation_model_ids" {
   description = "Model ids of the Amazon Bedrock text generation model to use in the retrieval chain"
   type        = list(string)
 }
+
+variable "vpn_cidr" {
+  description = "CIDR block for the VPN"
+  type        = string
+}
