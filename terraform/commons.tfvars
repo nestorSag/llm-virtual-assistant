@@ -6,6 +6,7 @@ vpc = {
   enable_nat_gateway = true
   cidr               = "10.1.0.0/16"
 }
+vpn_cidr = "10.2.0.0/16"
 embedding_model_id = "amazon.titan-embed-text-v2:0"
 text_generation_model_ids = [
   "anthropic.claude-3-sonnet-20240229-v1:0"
