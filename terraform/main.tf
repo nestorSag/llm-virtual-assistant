@@ -20,7 +20,7 @@ provider "aws" {
   default_tags {
     tags = {
       Environment = "dev"
-      Project     = "aws-sample-bedrock-rag-template"
+      Project     = "lynceus-rag"
     }
   }
 }
@@ -28,7 +28,7 @@ provider "aws" {
 module "vpc" {
   #checkov:skip=CKV_AWS_130: "Ensure VPC subnets do not assign public IP by default"
   source                  = "git::https://github.com/terraform-aws-modules/terraform-aws-vpc?ref=4a2809c"
-  name                    = "bedrock-rag-template"
+  name                    = "lynceus-rag"
   cidr                    = var.vpc.cidr
   private_subnets         = var.vpc.private_subnets
   public_subnets          = var.vpc.public_subnets
@@ -76,7 +76,7 @@ resource "aws_ssm_parameter" "parameters" {
   #checkov:skip=CKV_AWS_337: "Ensure SSM parameters are using KMS CMK"
   #checkov:skip=CKV2_AWS_34: "AWS SSM Parameter should be Encrypted"
   for_each = local.ssm_parameter_for_sagamaker
-  name     = "/bedrock-rag-template/${each.key}"
+  name     = "/lynceus-rag/${each.key}"
   type     = "String"
   value    = each.value
 }
@@ -134,7 +134,7 @@ module "lambda_ingestion" {
     kms_key_arn       = module.kms.key_arn
     account_id        = data.aws_caller_identity.current.id
     aws_region        = data.aws_region.current.name
-    prefix            = "bedrock-rag-template"
+    prefix            = "lynceus-rag"
 
 
     bedrock_model_ids = concat(
@@ -164,7 +164,7 @@ module "lambda_ingestion" {
 module "ecr" {
   source = "git::https://github.com/terraform-aws-modules/terraform-aws-ecr.git?ref=9daab07"
 
-  repository_name                 = "bedrock-rag-template"
+  repository_name                 = "lynceus-rag"
   repository_image_tag_mutability = "IMMUTABLE"
   repository_force_delete         = true
   repository_lifecycle_policy = jsonencode({
@@ -216,7 +216,7 @@ data "aws_ecr_image" "lambda_document_ingestion" {
 module "s3" {
   source = "git::https://github.com/terraform-aws-modules/terraform-aws-s3-bucket.git?ref=8a0b697"
 
-  bucket = "bedrock-rag-template${data.aws_caller_identity.current.account_id}"
+  bucket = "lynceus-rag${data.aws_caller_identity.current.account_id}"
 
   force_destroy = true
   versioning = {
@@ -275,7 +275,7 @@ module "kms" {
 
   description = "Bedrock RAG Template Encrytion"
   key_usage   = "ENCRYPT_DECRYPT"
-  aliases     = ["aws-sample/bedrock-rag-template"]
+  aliases     = ["lynceus-rag"]
 
   key_statements = [
     jsondecode(templatefile("${path.module}/policies/kms.json", {
@@ -397,7 +397,7 @@ resource "aws_security_group" "vpc_endpoints" {
 resource "aws_sagemaker_notebook_instance" "demo" {
   #checkov:skip=CKV_AWS_122: "Demo instance only"
   #checkov:skip=CKV_AWS_307: "Use will need to install dependencies"
-  name          = "aws-sample-bedrock-rag-template"
+  name          = "lynceus-rag"
   role_arn      = module.lambda_ingestion.lambda_role_arn
   instance_type = "ml.t2.medium"
   kms_key_id    = module.kms.key_arn
@@ -413,7 +413,7 @@ module "vpn-client" {
   source  = "babicamir/vpn-client/aws"
   version = "1.0.1"
   organization_name      = "Lynceus"
-  project-name           = "bedrock-rag-template"
+  project-name           = "lynceus-rag"
   environment            = "dev"
   # Network information
   vpc_id                 = module.vpc.vpc_id

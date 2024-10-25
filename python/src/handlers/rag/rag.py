@@ -34,13 +34,13 @@ session = boto3.Session()
 credentials = session.get_credentials()
 
 ############ retrieve parameters from SSM
-def get_ssm_parameter(session: Session, parameter_name: str, prefix:str = '/bedrock-rag-template/'):
+def get_ssm_parameter(session: Session, parameter_name: str, prefix:str = '/lynceus-rag/'):
     """Retrieve a parameter's value from AWS SSM Parameter Store.
 
     Args:
         session (Session): the boto3 session to use to retrieve the parameters
         parameter_name (str): the name of the parameter
-        prefix (str, optional): Parameter's prefix. Defaults to '/bedrock-rag-template/'.
+        prefix (str, optional): Parameter's prefix. Defaults to '/lynceus-rag/'.
 
     """
     ssm = session.client('ssm')

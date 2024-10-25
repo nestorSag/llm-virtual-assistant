@@ -1,8 +1,8 @@
 [tool.poetry]
-name = "bedrock-rag-template"
+name = "lynceus-rag"
 version = "0.1.0"
 description = ""
-authors = ["Julian Grueber <juligrue@amazon.com>"]
+authors = ["Nestor Sanchez <nestor.sanchez@lynceus.ai>"]
 
 
 [tool.poetry.dependencies]
