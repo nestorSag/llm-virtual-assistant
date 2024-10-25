@@ -148,14 +148,28 @@ def get_rag_connection(
 def retrieve(
     query: str,
     k: int,
-):
-    
+) -> t.List[t.Dict[str, t.Any]]:
+    """Retrieve relevant documents from the vector store
+
+    Parameters
+    ----------
+    query : str
+        Query to search for
+    k : int
+        Number of documents to retrieve
+
+    Returns
+    -------
+    t.List[t.Dict[str, t.Any]]
+        List of retrieved documents
+    """    
     doc_scores = vector_store.similarity_search_with_relevance_scores(query, k=k)
     retrieved = []
     for doc, score in doc_scores:
-        doc.metadata["document_score"] = score
-        retrieved.append({"content": doc.text, "score": doc.metadata})
-    return docs
+        doc_dict = doc.dict()
+        doc_dict["score"] = score
+        retrieved.append(doc_dict)
+    return retrieved
 
 # for item in docs:
 #     print(item)

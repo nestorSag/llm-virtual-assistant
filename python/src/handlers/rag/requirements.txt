@@ -7,3 +7,4 @@ instructor==0.3.5
 tiktoken==0.7.0
 boto3==1.34.101 
 langchain_aws==0.1.6 
+Flask==3.0.3
