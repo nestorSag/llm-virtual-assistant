@@ -1,14 +1,22 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: MIT-0
 locals {
-  source_path   = "${path.root}/../python/src/handlers/data_ingestion_processor"
   path_include  = ["**"]
   path_exclude  = ["**/__pycache__/**"]
-  files_include = setunion([for f in local.path_include : fileset(local.source_path, f)]...)
-  files_exclude = setunion([for f in local.path_exclude : fileset(local.source_path, f)]...)
-  files         = sort(setsubtract(local.files_include, local.files_exclude))
 
-  dir_sha = sha1(join("", [for f in local.files : filesha1("${local.source_path}/${f}")]))
+  # Preproc files hash (tracks changes in preproc source code)
+  preproc_source_path   = "${path.root}/../python/src/handlers/data_ingestion_processor"
+  preproc_files_include = setunion([for f in local.path_include : fileset(local.preproc_source_path, f)]...)
+  preproc_files_exclude = setunion([for f in local.path_exclude : fileset(local.preproc_source_path, f)]...)
+  preproc_files         = sort(setsubtract(local.preproc_files_include, local.preproc_files_exclude))
+  preproc_dir_sha = sha1(join("", [for f in local.preproc_files : filesha1("${local.preproc_source_path}/${f}")]))
+
+  # Server files hash (tracks changes in server source code)
+  server_source_path   = "${path.root}/../python/src/handlers/rag"
+  server_files_include = setunion([for f in local.path_include : fileset(local.server_source_path, f)]...)
+  server_files_exclude = setunion([for f in local.path_exclude : fileset(local.server_source_path, f)]...)
+  server_files         = sort(setsubtract(local.server_files_include, local.server_files_exclude))
+  server_dir_sha = sha1(join("", [for f in local.server_files : filesha1("${local.server_source_path}/${f}")]))
 
   image_tag = "latest-${formatdate("YYYYMMDDhhmmss", timestamp())}"
 

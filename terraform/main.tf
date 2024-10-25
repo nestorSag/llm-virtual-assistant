@@ -8,13 +8,7 @@ terraform {
       version = ">= 5.32"
     }
   }
-  backend "s3" {
-    bucket = "lynceus-llm-terraform-state"
-    key    = "main-rag-backend" #name of the S3 object that will store the state file
-    region = "us-east-1"
-  }
 }
-
 provider "aws" {
   region = var.region
   default_tags {
@@ -143,7 +137,7 @@ module "lambda_ingestion" {
     )
   })
 
-  depends_on = [null_resource.build_and_push_docker_image]
+  depends_on = [null_resource.build_and_push_preproc_image]
 
 
   assume_role_policy_statements = {
@@ -161,7 +155,7 @@ module "lambda_ingestion" {
 }
 
 
-module "ecr" {
+module "preproc_ecr" {
   source = "git::https://github.com/terraform-aws-modules/terraform-aws-ecr.git?ref=9daab07"
 
   repository_name                 = "bedrock-rag-template"
@@ -187,28 +181,28 @@ module "ecr" {
 }
 
 
-resource "null_resource" "build_and_push_docker_image" {
+resource "null_resource" "build_and_push_preproc_image" {
   provisioner "local-exec" {
     command = <<-EOT
-    aws ecr get-login-password --region ${data.aws_region.current.name} | docker login --username AWS --password-stdin ${module.ecr.repository_url}
+    aws ecr get-login-password --region ${data.aws_region.current.name} | docker login --username AWS --password-stdin ${module.preproc_ecr.repository_url}
     docker build \
       --platform=linux/amd64 \
-      -t ${module.ecr.repository_url}:${local.dir_sha} \
-      ${local.source_path}
-    docker push ${module.ecr.repository_url}:${local.dir_sha}
+      -t ${module.preproc_ecr.repository_url}:${local.preproc_dir_sha} \
+      ${local.preproc_source_path}
+    docker push ${module.preproc_ecr.repository_url}:${local.preproc_dir_sha}
     EOT
   }
 
   triggers = {
-    dir_sha = local.dir_sha
+    preproc_dir_sha = local.preproc_dir_sha
   }
 }
 
 data "aws_ecr_image" "lambda_document_ingestion" {
-  repository_name = module.ecr.repository_name
-  image_tag       = local.dir_sha
+  repository_name = module.preproc_ecr.repository_name
+  image_tag       = local.preproc_dir_sha
   depends_on = [
-    null_resource.build_and_push_docker_image
+    null_resource.build_and_push_preproc_image
   ]
 }
 
@@ -409,21 +403,186 @@ resource "aws_sagemaker_notebook_instance" "demo" {
 
 
 
-module "vpn-client" {
-  source  = "babicamir/vpn-client/aws"
-  version = "1.0.1"
-  organization_name      = "Lynceus"
-  project-name           = "bedrock-rag-template"
-  environment            = "dev"
-  # Network information
-  vpc_id                 = module.vpc.vpc_id
-  subnet_id              = module.vpc.public_subnets[0]
-  client_cidr_block      = var.vpn_cidr # It must be different from the primary VPC CIDR
-  # VPN config options
-  split_tunnel           = "true" # or false
-  vpn_inactive_period = "300" # seconds
-  session_timeout_hours  = "8"
-  logs_retention_in_days = "7"
-  # List of users to be created
-  aws-vpn-client-list    = ["root", "nestor", "guglielmo"] #Do not delete "root" user!
+######## containerised RAG server ECR, load balancer and ECS ########
+module "server_ecr" {
+  source = "git::https://github.com/terraform-aws-modules/terraform-aws-ecr.git?ref=9daab07"
+
+  repository_name                 = "rag-server"
+  repository_image_tag_mutability = "IMMUTABLE"
+  repository_force_delete         = true
+  repository_lifecycle_policy = jsonencode({
+    rules = [
+      {
+        rulePriority = 1,
+        description  = "Keep last 3 images",
+        selection = {
+          tagStatus     = "tagged",
+          tagPrefixList = ["v"],
+          countType     = "imageCountMoreThan",
+          countNumber   = 3
+        },
+        action = {
+          type = "expire"
+        }
+      }
+    ]
+  })
+}
+
+resource "null_resource" "build_and_push_server_image" {
+  provisioner "local-exec" {
+    command = <<-EOT
+    aws ecr get-login-password --region ${data.aws_region.current.name} | docker login --username AWS --password-stdin ${module.server_ecr.repository_url}
+    docker build \
+      --platform=linux/amd64 \
+      -t ${module.server_ecr.repository_url}:${local.server_dir_sha} \
+      ${local.server_source_path}
+    docker push ${module.server_ecr.repository_url}:${local.server_dir_sha}
+    EOT
+  }
+
+  triggers = {
+    preproc_dir_sha = local.server_dir_sha
+  }
+}
+
+data "aws_ecr_image" "rag_server" {
+  repository_name = module.server_ecr.repository_name
+  image_tag       = local.server_dir_sha
+  depends_on = [
+    null_resource.build_and_push_server_image
+  ]
+}
+
+module "alb" {
+  source = "terraform-aws-modules/alb/aws"
+
+  name    = "rag-server-lb"
+  vpc_id  = module.vpc.vpc_id
+  subnets = module.vpc.public_subnets
+  load_balancer_type = "application"
+
+  # Security Group
+  security_group_ingress_rules = {
+    http_all = {
+      from_port   = 80
+      to_port     = 80
+      ip_protocol = "tcp"
+      description = "HTTP web traffic"
+      cidr_ipv4   = "0.0.0.0/0"
+    }
+  }
+  security_group_egress_rules = {
+    vpc_all = {
+      ip_protocol = "-1"
+      cidr_ipv4   = module.vpc.vpc_cidr_block
+    }
+  }
+
+  access_logs = {
+    bucket = "rag-server-lb-logs"
+  }
+
+  listeners = {
+    rag-server-http-forward = {
+      port     = 80
+      protocol = "HTTP"
+      forward = {
+        target_group_key = "rag_server"
+      }
+    }
+  }
+
+  target_groups = {
+    rag_server = {
+      backend_protocol = "HTTP"
+      backend_port     = 5000
+      target_type      = "ip"
+      create_attachment = false
+    }
+  }
+
+  tags = {
+    Environment = "Development"
+    Project     = var.project_name
+  }
+}
+
+module "ecs" {
+  source = "terraform-aws-modules/ecs/aws"
+  depends_on = [aws_ecr_image.rag_server]
+  # Capacity provider
+  fargate_capacity_providers = {
+    FARGATE = {
+      default_capacity_provider_strategy = {
+        weight = 100
+      }
+    }
+  }
+
+  services = {
+    rag-service = {
+      cpu    = 1024
+      memory = 4096
+
+      # Container definition(s)
+      container_definitions = {
+
+        rag-server = {
+          cpu       = 1024
+          memory    = 4096
+          essential = true
+          image     = "${data.aws_ecr_image.rag_server.repository_url}:${local.server_dir_sha}"
+        }
+      }
+
+      load_balancer = {
+        service = {
+          target_group_arn = module.alb.target_group_arns["rag_server"]
+          container_name   = "rag-server"
+          container_port   = 5000
+        }
+      }
+
+      tasks_iam_role_name = "RAGServerTaskExecutionRole"
+      task_iam_role_policies = templatefile("${path.module}/policies/data_ingestion_processor.json", {
+        aurora_secret_arn = module.aurora.cluster_master_user_secret[0].secret_arn
+        s3_bucket_arn     = module.s3.s3_bucket_arn
+        kms_key_arn       = module.kms.key_arn
+        account_id        = data.aws_caller_identity.current.id
+        aws_region        = data.aws_region.current.name
+        prefix            = "bedrock-rag-template"
+
+
+        bedrock_model_ids = concat(
+          ["arn:aws:bedrock:${data.aws_region.current.name}::foundation-model/${var.embedding_model_id}"],
+          local.text_generation_model_arns
+        )
+      })
+
+      subnet_ids = module.vpc.private_subnets
+      security_group_rules = {
+        alb_ingress_3000 = {
+          type                     = "ingress"
+          from_port                = 80
+          to_port                  = 5000
+          protocol                 = "tcp"
+          description              = "Service port"
+          source_security_group_id = module.alb.security_group_id
+        }
+        egress_all = {
+          type        = "egress"
+          from_port   = 0
+          to_port     = 0
+          protocol    = "-1"
+          cidr_blocks = ["0.0.0.0/0"]
+        }
+      }
+    }
+  }
+
+  tags = {
+    Environment = "Development"
+    Project     = var.project_name
+  }
 }
